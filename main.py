@@ -140,7 +140,7 @@ def download_youtube_video(video_url):
             "python", "-m", "yt_dlp",
             "-f", "bestvideo[height<=1080]+bestaudio/best",
             "--merge-output-format", "mp4",
-            "--js-runtimes", "nodejs",
+            "--js-runtimes", "deno",
             "--no-playlist",
             "--no-progress",
             "-o", output_path,
