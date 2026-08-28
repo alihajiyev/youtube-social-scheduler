@@ -141,6 +141,7 @@ def download_youtube_video(video_url):
             "-f", "bestvideo[height<=1080]+bestaudio/best",
             "--merge-output-format", "mp4",
             "--js-runtimes", "deno",
+            "--remote-components", "ejs:github",
             "--cookies", "cookies.txt",
             "--extractor-args", "youtube:player_client=mweb",
             "--no-playlist",
