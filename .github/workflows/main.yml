@@ -1,4 +1,4 @@
-name: YouTube to Instagram & TikTok
+name: YouTube to Instagram
 
 on:
   schedule:
@@ -29,11 +29,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m playwright install chromium --with-deps
-
-      - name: Setup TikTok cookies
-        env:
-          TIKTOK_COOKIES: ${{ secrets.TIKTOK_COOKIES }}
-        run: python -c "import os; open('tiktok_cookies.json','w').write(os.environ['TIKTOK_COOKIES'])"
 
       - name: Check and post
         env:

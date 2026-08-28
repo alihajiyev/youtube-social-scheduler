@@ -3,7 +3,6 @@ import sys
 import json
 import time
 import logging
-import asyncio
 import tempfile
 import subprocess
 from datetime import datetime, timezone, timedelta
@@ -106,7 +105,7 @@ KURALLAR:
 - Sondaki hashtag'ler # ile baslasin
 
 ORNEK (Turkce video icin):
-Bu gercek sizi sasirtacak! Film dunyasindaki bu kucuk sirri biliyor muydunuz? 👀🔥
+Bu gercek sizi sasirtacak! Film dunyasindaki bu kucuk sirri biliyor muydunuz? 
 
 #sinema #film #merak #marvel #superkahraman
 
@@ -265,40 +264,10 @@ def create_instagram_reels(video, access_token, business_account_id):
         return False
 
 
-def post_to_tiktok(video):
-    try:
-        from tiktok_upload import upload_to_tiktok
-
-        video_path = download_youtube_video(video["link"])
-        if not video_path:
-            logger.error("TikTok icin video indirilemedi!")
-            return False
-
-        caption = generate_instagram_caption(video["title"], video["link"], video.get("description", ""))
-
-        hashtags = ["YouTube", "Video", "YeniVideo"]
-        title_words = video["title"].split()[:3]
-        hashtags.extend([w for w in title_words if len(w) > 3])
-
-        result = asyncio.run(upload_to_tiktok(video_path, caption, hashtags))
-
-        try:
-            os.remove(video_path)
-            os.rmdir(os.path.dirname(video_path))
-        except:
-            pass
-
-        return result
-    except Exception as e:
-        logger.error(f"TikTok hatasi: {e}")
-        return False
-
-
 def check_and_post():
     channel_id = os.getenv('YOUTUBE_CHANNEL_ID', 'UCDxooL2M22LvKI32dREyjfQ')
     instagram_token = os.getenv('INSTAGRAM_ACCESS_TOKEN')
     instagram_business_id = os.getenv('INSTAGRAM_BUSINESS_ACCOUNT_ID')
-    tiktok_cookies_exist = Path("tiktok_cookies.json").exists()
     force_video_id = os.getenv('FORCE_VIDEO_ID')
 
     if force_video_id:
@@ -323,9 +292,6 @@ def check_and_post():
 
         if instagram_token and instagram_business_id:
             create_instagram_reels(video, instagram_token, instagram_business_id)
-
-        if tiktok_cookies_exist:
-            post_to_tiktok(video)
 
         mark_as_posted(video['id'])
         time.sleep(5)
