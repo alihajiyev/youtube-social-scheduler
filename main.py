@@ -143,7 +143,7 @@ def download_youtube_video(video_url):
             "--js-runtimes", "deno",
             "--remote-components", "ejs:github",
             "--cookies", "cookies.txt",
-            "--extractor-args", "youtube:player_client=mweb",
+            "--extractor-args", "youtube:player_client=tv,web",
             "--no-playlist",
             "--no-progress",
             "-o", output_path,
