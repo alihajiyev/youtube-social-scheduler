@@ -1,5 +1,4 @@
 import os
-import sys
 import json
 import time
 import logging
@@ -105,7 +104,7 @@ KURALLAR:
 - Sondaki hashtag'ler # ile baslasin
 
 ORNEK (Turkce video icin):
-Bu gercek sizi sasirtacak! Film dunyasindaki bu kucuk sirri biliyor muydunuz? 
+Bu gercek sizi sasirtacak! Film dunyasindaki bu kucuk sirri biliyor muydunuz? 👀🔥
 
 #sinema #film #merak #marvel #superkahraman
 
@@ -138,9 +137,8 @@ def download_youtube_video(video_url):
         output_path = os.path.join(tmp_dir, "video.mp4")
 
         cmd = [
-            sys.executable, "-m", "yt_dlp",
-            "-f", "b",
-            "--merge-output-format", "mp4",
+            "python", "-m", "yt_dlp",
+            "-f", "best[ext=mp4]/best",
             "--no-playlist",
             "-o", output_path,
             video_url
@@ -152,11 +150,8 @@ def download_youtube_video(video_url):
             return output_path
 
         for f in os.listdir(tmp_dir):
-            if f.endswith(('.mp4', '.webm', '.mkv')):
-                src = os.path.join(tmp_dir, f)
-                if src != output_path:
-                    os.rename(src, output_path)
-                return output_path
+            if f.endswith('.mp4'):
+                return os.path.join(tmp_dir, f)
 
         return None
     except Exception as e:
@@ -261,6 +256,46 @@ def create_instagram_reels(video, access_token, business_account_id):
             return False
     except Exception as e:
         logger.error(f"Instagram hatasi: {e}")
+        return False
+
+
+def post_to_tiktok(video, access_token):
+    try:
+        caption = f"{video['title']} #YouTube #Video"
+        url = "https://open.tiktokapis.com/v2/post/publish/video/link/fetch/"
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        }
+        payload = {
+            'post_info': {
+                'title': caption,
+                'privacy_level': 'PUBLIC_TO_EVERYONE',
+                'disable_duet': False,
+                'disable_comment': False,
+                'disable_stitch': False
+            },
+            'source_info': {
+                'source': 'PULL_FROM_YOUTUBE',
+                'youtube_video_url': video['link']
+            }
+        }
+
+        response = requests.post(url, json=payload, headers=headers)
+
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('data', {}).get('publish_id'):
+                logger.info("TikTok paylasimi basarili!")
+                return True
+            else:
+                logger.error(f"TikTok yanit hatasi: {data}")
+                return False
+        else:
+            logger.error(f"TikTok hatasi: {response.text}")
+            return False
+    except Exception as e:
+        logger.error(f"TikTok hatasi: {e}")
         return False
 
 
