@@ -2,6 +2,8 @@ import os
 import json
 import time
 import logging
+import tempfile
+import subprocess
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -21,14 +23,7 @@ logger = logging.getLogger(__name__)
 
 DATA_FILE = Path("posted_videos.json")
 
-GEMINI_API_KEYS = [
-    "AIzaSyAOVYXnN36rbEM0wc3ettzbzUHyx-Exves",
-    "AIzaSyB7vmUprtwBHhsCSb8urZqHHn5rTEPB8EE",
-    "AIzaSyCvC9qF29SIgFsLMvdiruiBqR2qmx70nCE",
-    "AIzaSyB6v1IQYhAyoZ8qK957sG-mW5gijCbNO-A",
-    "AIzaSyDIuxRyLpYlhD5tM7tPdxfW0hhuXMwHwd0",
-    "AIzaSyDMKFusKDyY3ude89ivxAKxvMsXlbNpm7E",
-]
+GEMINI_API_KEYS = [k.strip() for k in os.getenv('GEMINI_API_KEYS', '').split(',') if k.strip()]
 
 GEMINI_MODELS = [
     "gemini-2.5-flash",
@@ -123,13 +118,78 @@ Sadece caption'i yaz, baska bir sey yazma."""
         return f"🎬 {video_title}\n\n🔗 Videoyu izle: {video_link}\n\n#YouTube #Video"
 
 
+def download_youtube_video(video_url):
+    try:
+        tmp_dir = tempfile.mkdtemp()
+        output_path = os.path.join(tmp_dir, "video.mp4")
+
+        cmd = [
+            "python", "-m", "yt_dlp",
+            "-f", "best[ext=mp4]/best",
+            "--no-playlist",
+            "-o", output_path,
+            video_url
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+        if os.path.exists(output_path):
+            return output_path
+
+        for f in os.listdir(tmp_dir):
+            if f.endswith('.mp4'):
+                return os.path.join(tmp_dir, f)
+
+        return None
+    except Exception as e:
+        logger.error(f"Video indirme hatasi: {e}")
+        return None
+
+
+def upload_to_catbox(file_path):
+    try:
+        with open(file_path, 'rb') as f:
+            response = requests.post(
+                'https://catbox.moe/user/api.php',
+                data={'reqtype': 'fileupload', 'userhash': ''},
+                files={'fileToUpload': ('video.mp4', f, 'video/mp4')},
+                timeout=120
+            )
+
+        if response.status_code == 200 and response.text.startswith('http'):
+            return response.text.strip()
+        return None
+    except Exception as e:
+        logger.error(f"Catbox yukleme hatasi: {e}")
+        return None
+
+
 def create_instagram_reels(video, access_token, business_account_id):
     try:
         caption = generate_instagram_caption(video["title"], video["link"])
         logger.info(f"Olusturulan caption: {caption}")
 
-        video_id = video["id"]
-        thumbnail_url = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg"
+        logger.info("Video indiriliyor...")
+        video_path = download_youtube_video(video["link"])
+
+        if not video_path:
+            logger.error("Video indirilemedi!")
+            return False
+
+        logger.info("Video catbox'a yukleniyor...")
+        video_url = upload_to_catbox(video_path)
+
+        try:
+            os.remove(video_path)
+            os.rmdir(os.path.dirname(video_path))
+        except:
+            pass
+
+        if not video_url:
+            logger.error("Video yuklenemedi!")
+            return False
+
+        logger.info(f"Video URL: {video_url}")
 
         url = f"https://graph.facebook.com/v18.0/{business_account_id}/media"
         payload = {
@@ -137,7 +197,7 @@ def create_instagram_reels(video, access_token, business_account_id):
             'caption': caption,
             'share_to_feed': 'true',
             'access_token': access_token,
-            'image_url': thumbnail_url
+            'video_url': video_url
         }
 
         response = requests.post(url, data=payload)
@@ -146,7 +206,24 @@ def create_instagram_reels(video, access_token, business_account_id):
             container_id = response.json().get('id')
             logger.info(f"Instagram container olusturuldu: {container_id}")
 
-            time.sleep(10)
+            for i in range(40):
+                time.sleep(5)
+                check = requests.get(
+                    f"https://graph.facebook.com/v18.0/{container_id}",
+                    params={'fields': 'status_code', 'access_token': access_token}
+                )
+                status = check.json().get('status_code', '')
+                logger.info(f"  Durum: {status} ({(i+1)*5}s)")
+
+                if status == 'FINISHED':
+                    break
+                elif status == 'ERROR':
+                    logger.error(f"Video isleme hatasi: {check.json()}")
+                    return False
+
+            if status != 'FINISHED':
+                logger.error("Video isleme zaman asimi!")
+                return False
 
             publish_url = f"https://graph.facebook.com/v18.0/{business_account_id}/media_publish"
             publish_payload = {
