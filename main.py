@@ -138,7 +138,7 @@ def download_youtube_video(video_url):
 
         cmd = [
             "python", "-m", "yt_dlp",
-            "-f", "best[ext=mp4]/best",
+            "--merge-output-format", "mp4",
             "--no-playlist",
             "-o", output_path,
             video_url
@@ -150,7 +150,7 @@ def download_youtube_video(video_url):
             return output_path
 
         for f in os.listdir(tmp_dir):
-            if f.endswith('.mp4'):
+            if f.endswith(('.mp4', '.webm', '.mkv')):
                 return os.path.join(tmp_dir, f)
 
         return None
