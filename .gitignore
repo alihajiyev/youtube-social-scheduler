@@ -6,3 +6,8 @@ posted_videos.json
 .vscode/
 .idea/
 *.log
+cookies.txt
+tiktok_cookies.json
+test_*.png
+test_*.mp4
+convert_cookies.py
