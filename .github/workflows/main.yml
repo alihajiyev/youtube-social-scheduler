@@ -13,7 +13,7 @@ on:
 
 jobs:
   check-and-post:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     
     steps:
       - name: Checkout code
@@ -24,39 +24,22 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Debug - check python
-        run: |
-          which python3 || which python
-          python3 --version || python --version
-
       - name: Install dependencies
         run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install -r requirements.txt
-          playwright install chromium --with-deps
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m playwright install chromium --with-deps
 
       - name: Setup TikTok cookies
         env:
           TIKTOK_COOKIES: ${{ secrets.TIKTOK_COOKIES }}
-        run: python3 -c "import os; open('tiktok_cookies.json','w').write(os.environ['TIKTOK_COOKIES'])"
+        run: python -c "import os; open('tiktok_cookies.json','w').write(os.environ['TIKTOK_COOKIES'])"
 
-      - name: Debug - check files
-        run: |
-          ls -la tiktok_cookies.json
-          head -c 200 tiktok_cookies.json
-
-      - name: Check and post new videos
+      - name: Check and post
         env:
           YOUTUBE_CHANNEL_ID: ${{ secrets.YOUTUBE_CHANNEL_ID }}
           INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
           INSTAGRAM_BUSINESS_ACCOUNT_ID: ${{ secrets.INSTAGRAM_BUSINESS_ACCOUNT_ID }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           FORCE_VIDEO_ID: ${{ github.event.inputs.force_video_id }}
-        run: python3 main.py
-
-      - name: Upload posted videos data
-        uses: actions/upload-artifact@v4
-        with:
-          name: posted-videos
-          path: posted_videos.json
-          retention-days: 90
+        run: python main.py
