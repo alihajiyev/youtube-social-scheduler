@@ -259,46 +259,6 @@ def create_instagram_reels(video, access_token, business_account_id):
         return False
 
 
-def post_to_tiktok(video, access_token):
-    try:
-        caption = f"{video['title']} #YouTube #Video"
-        url = "https://open.tiktokapis.com/v2/post/publish/video/link/fetch/"
-        headers = {
-            'Authorization': f'Bearer {access_token}',
-            'Content-Type': 'application/json'
-        }
-        payload = {
-            'post_info': {
-                'title': caption,
-                'privacy_level': 'PUBLIC_TO_EVERYONE',
-                'disable_duet': False,
-                'disable_comment': False,
-                'disable_stitch': False
-            },
-            'source_info': {
-                'source': 'PULL_FROM_YOUTUBE',
-                'youtube_video_url': video['link']
-            }
-        }
-
-        response = requests.post(url, json=payload, headers=headers)
-
-        if response.status_code == 200:
-            data = response.json()
-            if data.get('data', {}).get('publish_id'):
-                logger.info("TikTok paylasimi basarili!")
-                return True
-            else:
-                logger.error(f"TikTok yanit hatasi: {data}")
-                return False
-        else:
-            logger.error(f"TikTok hatasi: {response.text}")
-            return False
-    except Exception as e:
-        logger.error(f"TikTok hatasi: {e}")
-        return False
-
-
 def check_and_post():
     channel_id = os.getenv('YOUTUBE_CHANNEL_ID', 'UCDxooL2M22LvKI32dREyjfQ')
     instagram_token = os.getenv('INSTAGRAM_ACCESS_TOKEN')
@@ -326,7 +286,13 @@ def check_and_post():
         logger.info(f"Paylasiliyor: {video['title']}")
 
         if instagram_token and instagram_business_id:
-            create_instagram_reels(video, instagram_token, instagram_business_id)
+            success = create_instagram_reels(video, instagram_token, instagram_business_id)
+            if not success:
+                logger.error(f"Video paylasilamadi: {video['title']}, tekrar denenecek.")
+                continue
+        else:
+            logger.error("Instagram token veya business ID eksik!")
+            continue
 
         mark_as_posted(video['id'])
         time.sleep(5)
@@ -338,9 +304,27 @@ def mark_as_posted(video_id):
     save_posted_videos(posted_data)
 
 
+def commit_posted_videos():
+    try:
+        import subprocess
+        subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
+        subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
+        subprocess.run(["git", "add", "posted_videos.json"], check=True)
+        result = subprocess.run(["git", "diff", "--cached", "--quiet"], check=False)
+        if result.returncode != 0:
+            subprocess.run(["git", "commit", "-m", "Update posted_videos.json"], check=True)
+            subprocess.run(["git", "push"], check=True)
+            logger.info("posted_videos.json guncellendi ve push edildi.")
+        else:
+            logger.info("posted_videos.json degisiklik yok.")
+    except Exception as e:
+        logger.error(f"Git push hatasi: {e}")
+
+
 if __name__ == "__main__":
     try:
         check_and_post()
+        commit_posted_videos()
     except Exception as e:
         import traceback
         traceback.print_exc()
