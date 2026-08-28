@@ -133,42 +133,68 @@ SADECE caption yaz, baska bir sey yazma, secenek sunma, baslik ekleme."""
 
 def download_youtube_video(video_url):
     try:
+        cobalt_url = os.getenv('COBALT_API_URL', '').rstrip('/')
+        if not cobalt_url:
+            logger.error("COBALT_API_URL ayarli degil!")
+            return None
+
         tmp_dir = tempfile.mkdtemp()
         output_path = os.path.join(tmp_dir, "video.mp4")
 
-        cmd = [
-            "python", "-m", "yt_dlp",
-            "-f", "bestvideo[height<=1080]+bestaudio/best",
-            "--merge-output-format", "mp4",
-            "--js-runtimes", "deno",
-            "--remote-components", "ejs:github",
-            "--cookies", "cookies.txt",
-            "--extractor-args", "youtube:player_client=tv,web",
-            "--no-playlist",
-            "--no-progress",
-            "-o", output_path,
-            video_url
-        ]
+        logger.info(f"Cobalt API ile video indiriliyor: {cobalt_url}")
+        resp = requests.post(
+            cobalt_url + '/',
+            json={
+                "url": video_url,
+                "videoQuality": "1080",
+                "youtubeVideoCodec": "h264",
+                "filenameStyle": "basic"
+            },
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json"
+            },
+            timeout=60
+        )
 
-        logger.info(f"Komut: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        logger.info(f"yt-dlp returncode: {result.returncode}")
-        if result.stdout:
-            logger.info(f"yt-dlp stdout: {result.stdout[:500]}")
-        if result.stderr:
-            logger.info(f"yt-dlp stderr: {result.stderr[:500]}")
+        logger.info(f"Cobalt response: {resp.status_code} - {resp.text[:500]}")
 
-        if os.path.exists(output_path):
-            logger.info(f"Video indirildi: {output_path}")
-            return output_path
+        if resp.status_code != 200:
+            logger.error(f"Cobalt hatasi: {resp.status_code} {resp.text[:200]}")
+            return None
 
-        for f in os.listdir(tmp_dir):
-            if f.endswith(('.mp4', '.webm', '.mkv')):
-                found = os.path.join(tmp_dir, f)
-                logger.info(f"Bulunan video dosyasi: {found}")
-                return found
+        data = resp.json()
+        status = data.get('status')
 
-        logger.error(f"Tmp dizininde video yok: {os.listdir(tmp_dir)}")
+        if status == 'error':
+            logger.error(f"Cobalt video indirme hatasi: {data.get('error', {}).get('code', 'unknown')}")
+            return None
+
+        if status in ('tunnel', 'redirect'):
+            download_url = data.get('url')
+            if not download_url:
+                logger.error("Cobalt redirect URL donmedi")
+                return None
+
+            logger.info(f"Video indiriliyor: {download_url[:100]}...")
+            video_resp = requests.get(download_url, timeout=300, stream=True)
+
+            if video_resp.status_code == 200:
+                with open(output_path, 'wb') as f:
+                    for chunk in video_resp.iter_content(chunk_size=8192):
+                        f.write(chunk)
+
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 100000:
+                    logger.info(f"Video indirildi: {output_path} ({os.path.getsize(output_path)} bytes)")
+                    return output_path
+                else:
+                    logger.error("Indirilen video dosyasi cok kucuk veya yok")
+                    return None
+            else:
+                logger.error(f"Video download HTTP hatasi: {video_resp.status_code}")
+                return None
+
+        logger.error(f"Cobalt beklenmeyen status: {status}")
         return None
     except Exception as e:
         logger.error(f"Video indirme hatasi: {e}")
