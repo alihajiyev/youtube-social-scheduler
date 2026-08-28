@@ -42,7 +42,7 @@ jobs:
           INSTAGRAM_BUSINESS_ACCOUNT_ID: ${{ secrets.INSTAGRAM_BUSINESS_ACCOUNT_ID }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           FORCE_VIDEO_ID: ${{ github.event.inputs.force_video_id }}
-        run: python main.py
+        run: python3 main.py
 
       - name: Upload posted videos data
         uses: actions/upload-artifact@v4

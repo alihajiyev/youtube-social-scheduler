@@ -138,7 +138,7 @@ def download_youtube_video(video_url):
         output_path = os.path.join(tmp_dir, "video.mp4")
 
         cmd = [
-            "python", "-m", "yt_dlp",
+            "python3", "-m", "yt_dlp",
             "-f", "best[ext=mp4]/best",
             "--no-playlist",
             "-o", output_path,
