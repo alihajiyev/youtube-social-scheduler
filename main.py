@@ -59,7 +59,8 @@ def get_youtube_feed(channel_id):
             "link": entry.link,
             "published": published,
             "published_str": entry.published,
-            "description": entry.get("summary", "")
+            "description": entry.get("summary", ""),
+            "media_group": entry.get("media_group", {})
         })
     return videos
 
@@ -80,42 +81,54 @@ def get_new_videos_last_hour(channel_id):
     return new_videos
 
 
-def generate_instagram_caption(video_title, video_link):
-    prompt = f"""Sen bir Instagram sosyal medya uzmanisin. Asagidaki YouTube videosu icin Instagram'a uygun bir Reels caption yaz.
+def generate_instagram_caption(video_title, video_link, video_description=""):
+    description_text = video_description[:2000] if video_description else ""
 
-Video Basligi: {video_title}
-Video Linki: {video_link}
+    prompt = f"""Sen profesyonel bir Instagram sosyal medya uzmanisin. Asagidaki YouTube videosu icin tek bir profesyonel Instagram Reels caption yaz.
 
-Kurallar:
-- Emoji'ler kullan (ama abartma, 3-5 tane yeter)
-- Cekici ve merak uyandirici olsun
-- 2-3 tane hashtag ekle (#YouTube #Video gibi degil, konuyla ilgili)
-- Linki caption'in sonuna ekle
-- Kisa ve oz olsun (max 2-3 cumle)
-- Turkce yaz
+VIDEO BASLIGI: {video_title}
 
-Ornek:
-🎬 Bu gercek sizi sasirtacak! 
+VIDEO ACIKLAMASI (transcript/konu ozeti):
+{description_text}
 
-Film dunyasindaki bu kucuk sirri biliyor muydunuz? 👀🔥
+KURALLAR:
+- TAM 1 caption yaz, birden fazla secenek DEGIL
+- Video hangi dildeyse caption O DILDE yaz (Turkce ise Turkce, Rusca ise Rusca, Ingilizce ise Ingilizce)
+- Emoji kullan (3-5 tane, abartma)
+- Cekici, merak uyandirici ve profesyonel ol
+- 5-7 tane hashtag ekle (konuyla ilgili, buyuk ve kucuk harf karisik)
+- Hashtag'leri caption'in ALTINA ayri satirda yaz
+- Linki ekleme, sadece caption yaz
+- Max 4-5 cumle olsun
+- Tik gibi kisa ve vurucu olsun
+- Sondaki hashtag'ler # ile baslasin
 
-#sinema #film #merak
+ORNEK (Turkce video icin):
+Bu gercek sizi sasirtacak! Film dunyasindaki bu kucuk sirri biliyor muydunuz? 👀🔥
 
-🔗 Videoyu izle: https://youtube.com/watch?v=xxx
+#sinema #film #merak #marvel #superkahraman
 
-Sadece caption'i yaz, baska bir sey yazma."""
+SADECE caption yaz, baska bir sey yazma, secenek sunma, baslik ekleme."""
 
     try:
         resp, _, _, _ = gemini.generate_content(prompt)
         caption = resp.text.strip()
 
-        if video_link not in caption:
-            caption = f"{caption}\n\n🔗 Videoyu izle: {video_link}"
+        caption = caption.replace("**", "")
+        caption = caption.replace("Seçenek 1:", "")
+        caption = caption.replace("Seçenek 2:", "")
+        caption = caption.replace("Seçenek 3:", "")
+        caption = caption.replace("Seçenek 4:", "")
+        caption = caption.replace("**Seçenek", "")
+
+        lines = caption.split('\n')
+        clean_lines = [l for l in lines if not l.strip().startswith('**Seçenek') and not l.strip().startswith('Seçenek')]
+        caption = '\n'.join(clean_lines).strip()
 
         return caption
     except Exception as e:
         logger.error(f"Gemini caption hatasi: {e}")
-        return f"🎬 {video_title}\n\n🔗 Videoyu izle: {video_link}\n\n#YouTube #Video"
+        return f"🎬 {video_title}\n\n#YouTube #Video"
 
 
 def download_youtube_video(video_url):
@@ -166,7 +179,7 @@ def upload_to_catbox(file_path):
 
 def create_instagram_reels(video, access_token, business_account_id):
     try:
-        caption = generate_instagram_caption(video["title"], video["link"])
+        caption = generate_instagram_caption(video["title"], video["link"], video.get("description", ""))
         logger.info(f"Olusturulan caption: {caption}")
 
         logger.info("Video indiriliyor...")
