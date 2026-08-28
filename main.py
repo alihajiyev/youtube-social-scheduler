@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import logging
@@ -138,8 +139,9 @@ def download_youtube_video(video_url):
         output_path = os.path.join(tmp_dir, "video.mp4")
 
         cmd = [
-            "python", "-m", "yt_dlp",
-            "-f", "best[ext=mp4]/best",
+            sys.executable, "-m", "yt_dlp",
+            "-f", "b",
+            "--merge-output-format", "mp4",
             "--no-playlist",
             "-o", output_path,
             video_url
@@ -151,8 +153,11 @@ def download_youtube_video(video_url):
             return output_path
 
         for f in os.listdir(tmp_dir):
-            if f.endswith('.mp4'):
-                return os.path.join(tmp_dir, f)
+            if f.endswith(('.mp4', '.webm', '.mkv')):
+                src = os.path.join(tmp_dir, f)
+                if src != output_path:
+                    os.rename(src, output_path)
+                return output_path
 
         return None
     except Exception as e:
