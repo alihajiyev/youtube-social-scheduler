@@ -7,6 +7,11 @@ on:
     # Her gun Azerbaycan saati 20:05 (UTC 16:05)
     - cron: '5 16 * * *'
   workflow_dispatch:
+    inputs:
+      force_video_id:
+        description: 'YouTube video ID to force post (leave empty for auto)'
+        required: false
+        default: ''
 
 jobs:
   check-and-post:
@@ -24,13 +29,19 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
+          playwright install chromium --with-deps
+
+      - name: Setup TikTok cookies
+        run: |
+          echo '${{ secrets.TIKTOK_COOKIES }}' > tiktok_cookies.json
 
       - name: Check and post new videos
         env:
           YOUTUBE_CHANNEL_ID: ${{ secrets.YOUTUBE_CHANNEL_ID }}
           INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
           INSTAGRAM_BUSINESS_ACCOUNT_ID: ${{ secrets.INSTAGRAM_BUSINESS_ACCOUNT_ID }}
-          TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          FORCE_VIDEO_ID: ${{ github.event.inputs.force_video_id }}
         run: python main.py
 
       - name: Upload posted videos data

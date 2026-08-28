@@ -294,9 +294,18 @@ def check_and_post():
     instagram_token = os.getenv('INSTAGRAM_ACCESS_TOKEN')
     instagram_business_id = os.getenv('INSTAGRAM_BUSINESS_ACCOUNT_ID')
     tiktok_cookies_exist = Path("tiktok_cookies.json").exists()
+    force_video_id = os.getenv('FORCE_VIDEO_ID')
 
-    logger.info("Son 1 saatteki videolar kontrol ediliyor...")
-    new_videos = get_new_videos_last_hour(channel_id)
+    if force_video_id:
+        logger.info(f"TEST MODU: Video {force_video_id} zorla paylasiliyor...")
+        all_videos = get_youtube_feed(channel_id)
+        new_videos = [v for v in all_videos if v["id"] == force_video_id]
+        if not new_videos:
+            logger.error(f"Video bulunamadi: {force_video_id}")
+            return
+    else:
+        logger.info("Son 1 saatteki videolar kontrol ediliyor...")
+        new_videos = get_new_videos_last_hour(channel_id)
 
     if not new_videos:
         logger.info("Son 1 saatte yeni video bulunamadi.")
