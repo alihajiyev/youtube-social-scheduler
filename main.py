@@ -339,4 +339,8 @@ def mark_as_posted(video_id):
 
 
 if __name__ == "__main__":
-    check_and_post()
+    try:
+        check_and_post()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
