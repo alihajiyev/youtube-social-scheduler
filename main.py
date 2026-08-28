@@ -137,20 +137,25 @@ def download_youtube_video(video_url):
         output_path = os.path.join(tmp_dir, "video.mp4")
 
         cmd = [
-            "yt-dlp",
+            "python", "-m", "yt_dlp",
+            "-f", "bestvideo[height<=1080]+bestaudio/best",
             "--merge-output-format", "mp4",
             "--no-playlist",
+            "--no-progress",
             "-o", output_path,
             video_url
         ]
 
         logger.info(f"Komut: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-        logger.info(f"yt-dlp stdout: {result.stdout[:500]}")
-        logger.info(f"yt-dlp stderr: {result.stderr[:500]}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         logger.info(f"yt-dlp returncode: {result.returncode}")
+        if result.stdout:
+            logger.info(f"yt-dlp stdout: {result.stdout[:500]}")
+        if result.stderr:
+            logger.info(f"yt-dlp stderr: {result.stderr[:500]}")
 
         if os.path.exists(output_path):
+            logger.info(f"Video indirildi: {output_path}")
             return output_path
 
         for f in os.listdir(tmp_dir):
