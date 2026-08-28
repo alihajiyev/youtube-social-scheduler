@@ -137,22 +137,29 @@ def download_youtube_video(video_url):
         output_path = os.path.join(tmp_dir, "video.mp4")
 
         cmd = [
-            "python", "-m", "yt_dlp",
+            "yt-dlp",
             "--merge-output-format", "mp4",
             "--no-playlist",
             "-o", output_path,
             video_url
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        logger.info(f"Komut: {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        logger.info(f"yt-dlp stdout: {result.stdout[:500]}")
+        logger.info(f"yt-dlp stderr: {result.stderr[:500]}")
+        logger.info(f"yt-dlp returncode: {result.returncode}")
 
         if os.path.exists(output_path):
             return output_path
 
         for f in os.listdir(tmp_dir):
             if f.endswith(('.mp4', '.webm', '.mkv')):
-                return os.path.join(tmp_dir, f)
+                found = os.path.join(tmp_dir, f)
+                logger.info(f"Bulunan video dosyasi: {found}")
+                return found
 
+        logger.error(f"Tmp dizininde video yok: {os.listdir(tmp_dir)}")
         return None
     except Exception as e:
         logger.error(f"Video indirme hatasi: {e}")
