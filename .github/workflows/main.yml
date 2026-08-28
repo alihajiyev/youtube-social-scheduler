@@ -24,16 +24,26 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Debug - check python
+        run: |
+          which python3 || which python
+          python3 --version || python --version
+
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements.txt
           playwright install chromium --with-deps
 
       - name: Setup TikTok cookies
         env:
           TIKTOK_COOKIES: ${{ secrets.TIKTOK_COOKIES }}
-        run: python -c "import os; open('tiktok_cookies.json','w').write(os.environ['TIKTOK_COOKIES'])"
+        run: python3 -c "import os; open('tiktok_cookies.json','w').write(os.environ['TIKTOK_COOKIES'])"
+
+      - name: Debug - check files
+        run: |
+          ls -la tiktok_cookies.json
+          head -c 200 tiktok_cookies.json
 
       - name: Check and post new videos
         env:
@@ -42,7 +52,7 @@ jobs:
           INSTAGRAM_BUSINESS_ACCOUNT_ID: ${{ secrets.INSTAGRAM_BUSINESS_ACCOUNT_ID }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           FORCE_VIDEO_ID: ${{ github.event.inputs.force_video_id }}
-        run: python main.py
+        run: python3 main.py
 
       - name: Upload posted videos data
         uses: actions/upload-artifact@v4
