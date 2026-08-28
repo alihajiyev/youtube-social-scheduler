@@ -1,0 +1,41 @@
+name: YouTube to Instagram & TikTok
+
+on:
+  schedule:
+    # Her gun Azerbaycan saati 13:05 (UTC 09:05)
+    - cron: '5 9 * * *'
+    # Her gun Azerbaycan saati 20:05 (UTC 16:05)
+    - cron: '5 16 * * *'
+  workflow_dispatch:
+
+jobs:
+  check-and-post:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Check and post new videos
+        env:
+          YOUTUBE_CHANNEL_ID: ${{ secrets.YOUTUBE_CHANNEL_ID }}
+          INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+          INSTAGRAM_BUSINESS_ACCOUNT_ID: ${{ secrets.INSTAGRAM_BUSINESS_ACCOUNT_ID }}
+          TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
+        run: python main.py
+
+      - name: Upload posted videos data
+        uses: actions/upload-artifact@v4
+        with:
+          name: posted-videos
+          path: posted_videos.json
+          retention-days: 90
