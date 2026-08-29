@@ -36,16 +36,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Write cookies file
-        env:
-          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
-        run: echo "$YOUTUBE_COOKIES" | base64 -d > cookies.txt
-
       - name: Post to Instagram
         env:
           YOUTUBE_CHANNEL_ID: ${{ secrets.YOUTUBE_CHANNEL_ID }}
-          INSTAGRAM_USERNAME: ${{ secrets.INSTAGRAM_USERNAME }}
-          INSTAGRAM_PASSWORD: ${{ secrets.INSTAGRAM_PASSWORD }}
+          INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+          INSTAGRAM_BUSINESS_ACCOUNT_ID: ${{ secrets.INSTAGRAM_BUSINESS_ACCOUNT_ID }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
           FORCE_VIDEO_ID: ${{ github.event.inputs.force_video_id }}

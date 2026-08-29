@@ -2,6 +2,7 @@ import os
 import json
 import tempfile
 import subprocess
+import time
 import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -136,22 +137,85 @@ SADECE caption yaz."""
     return f"🎬 {title}\n\n#YouTube #Video"
 
 
-def upload_to_instagram(video_path, caption):
-    from instagrapi import Client
+def upload_to_catbox(file_path):
+    try:
+        log.info(f"Catbox upload: {file_path}")
+        with open(file_path, 'rb') as f:
+            r = requests.post(
+                'https://catbox.moe/user/api.php',
+                data={'reqtype': 'fileupload', 'userhash': ''},
+                files={'fileToUpload': ('video.mp4', f, 'video/mp4')},
+                timeout=180
+            )
+        log.info(f"Catbox response: {r.status_code} {r.text[:200]}")
+        if r.status_code == 200 and r.text.startswith('http'):
+            return r.text.strip()
+        return None
+    except Exception as e:
+        log.error(f"Catbox error: {e}")
+        return None
 
-    cl = Client()
-    cl.login(os.getenv("INSTAGRAM_USERNAME"), os.getenv("INSTAGRAM_PASSWORD"))
 
-    media = cl.clip_upload(path=video_path, caption=caption)
-    log.info(f"Instagram upload success! Media ID: {media.pk}")
-    return True
+def publish_to_instagram(video_url, caption):
+    token = os.getenv("INSTAGRAM_ACCESS_TOKEN")
+    biz_id = os.getenv("INSTAGRAM_BUSINESS_ACCOUNT_ID")
+    if not token or not biz_id:
+        log.error("Instagram token or business ID missing!")
+        return False
+
+    url = f"https://graph.facebook.com/v18.0/{biz_id}/media"
+    payload = {
+        'media_type': 'REELS',
+        'caption': caption,
+        'share_to_feed': 'true',
+        'access_token': token,
+        'video_url': video_url
+    }
+
+    r = requests.post(url, data=payload)
+    if r.status_code != 200:
+        log.error(f"Container error: {r.text}")
+        return False
+
+    container_id = r.json().get('id')
+    log.info(f"Container created: {container_id}")
+
+    for i in range(40):
+        time.sleep(5)
+        check = requests.get(
+            f"https://graph.facebook.com/v18.0/{container_id}",
+            params={'fields': 'status_code', 'access_token': token}
+        )
+        status = check.json().get('status_code', '')
+        log.info(f"  Status: {status} ({(i+1)*5}s)")
+        if status == 'FINISHED':
+            break
+        elif status == 'ERROR':
+            log.error(f"Processing error: {check.json()}")
+            return False
+
+    if status != 'FINISHED':
+        log.error("Processing timeout!")
+        return False
+
+    pub = requests.post(
+        f"https://graph.facebook.com/v18.0/{biz_id}/media_publish",
+        data={'creation_id': container_id, 'access_token': token}
+    )
+
+    if pub.status_code == 200:
+        log.info("Instagram Reels published!")
+        return True
+    else:
+        log.error(f"Publish error: {pub.text}")
+        return False
 
 
 def check_and_post():
     force_id = os.getenv("FORCE_VIDEO_ID")
 
     if force_id:
-        log.info(f"FORCE MODE: posting {force_id}")
+        log.info(f"FORCE MODE: {force_id}")
         videos = get_feed(CHANNEL_ID)
         new = [v for v in videos if v["id"] == force_id]
     else:
@@ -171,20 +235,24 @@ def check_and_post():
             log.error(f"Download failed: {video['title']}")
             continue
 
+        log.info("Uploading to catbox...")
+        video_url = upload_to_catbox(video_path)
+        try:
+            os.remove(video_path)
+            os.rmdir(os.path.dirname(video_path))
+        except:
+            pass
+
+        if not video_url:
+            log.error("Catbox upload failed!")
+            continue
+
         caption = generate_caption(video["title"], video.get("description", ""))
         log.info(f"Caption: {caption[:100]}...")
 
-        try:
-            upload_to_instagram(video_path, caption)
-        except Exception as e:
-            log.error(f"Instagram upload failed: {e}")
+        if not publish_to_instagram(video_url, caption):
+            log.error(f"Instagram failed: {video['title']}")
             continue
-        finally:
-            try:
-                os.remove(video_path)
-                os.rmdir(os.path.dirname(video_path))
-            except:
-                pass
 
         mark_posted(video["id"])
         log.info(f"Done: {video['title']}")
