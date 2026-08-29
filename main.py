@@ -217,16 +217,21 @@ def download_via_ytdlp(video_url):
 
 def upload_to_catbox(file_path):
     try:
+        file_size = os.path.getsize(file_path)
+        logger.info(f"Catbox yukleme: {file_path} ({file_size} bytes)")
         with open(file_path, 'rb') as f:
             response = requests.post(
                 'https://catbox.moe/user/api.php',
                 data={'reqtype': 'fileupload', 'userhash': ''},
                 files={'fileToUpload': ('video.mp4', f, 'video/mp4')},
-                timeout=120
+                timeout=180
             )
 
+        logger.info(f"Catbox response: {response.status_code} - {response.text[:200]}")
         if response.status_code == 200 and response.text.startswith('http'):
             return response.text.strip()
+
+        logger.error(f"Catbox yukleme basarisiz: {response.status_code} {response.text[:200]}")
         return None
     except Exception as e:
         logger.error(f"Catbox yukleme hatasi: {e}")
