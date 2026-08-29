@@ -2,8 +2,8 @@ name: YouTube to Instagram
 
 on:
   schedule:
-    - cron: '5 9 * * *'
-    - cron: '5 16 * * *'
+    - cron: '5 9 * * *'   # 13:05 AZ time (UTC+4)
+    - cron: '5 16 * * *'  # 20:05 AZ time (UTC+4)
   workflow_dispatch:
     inputs:
       force_video_id:
@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -28,15 +28,25 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Check and post
+      - name: Write cookies file
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: echo "$YOUTUBE_COOKIES" | base64 -d > cookies.txt
+
+      - name: Post to Instagram
         env:
           YOUTUBE_CHANNEL_ID: ${{ secrets.YOUTUBE_CHANNEL_ID }}
-          INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
-          INSTAGRAM_BUSINESS_ACCOUNT_ID: ${{ secrets.INSTAGRAM_BUSINESS_ACCOUNT_ID }}
+          INSTAGRAM_USERNAME: ${{ secrets.INSTAGRAM_USERNAME }}
+          INSTAGRAM_PASSWORD: ${{ secrets.INSTAGRAM_PASSWORD }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
-          YTDLP_API_URL: ${{ secrets.YTDLP_API_URL }}
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
           FORCE_VIDEO_ID: ${{ github.event.inputs.force_video_id }}
-        run: python main.py --run-once
+        run: python main.py

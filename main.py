@@ -1,431 +1,195 @@
 import os
 import json
-import time
-import logging
 import tempfile
 import subprocess
-import schedule
+import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import feedparser
 import requests
-from dotenv import load_dotenv
+from google import genai
 
-from gemini_manager import GeminiManager
-
-load_dotenv()
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+log = logging.getLogger(__name__)
 
 DATA_FILE = Path("posted_videos.json")
-
-GEMINI_API_KEYS = [k.strip() for k in os.getenv('GEMINI_API_KEYS', '').split(',') if k.strip()]
-
-GEMINI_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-3-flash",
-    "gemini-3.1-flash-lite",
-]
-
-gemini = GeminiManager(GEMINI_API_KEYS, GEMINI_MODELS)
+CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID", "UCDxooL2M22LvKI32dREyjfQ")
 
 
-def load_posted_videos():
+def load_posted():
     if DATA_FILE.exists():
-        with open(DATA_FILE, 'r') as f:
-            return json.load(f)
+        return json.loads(DATA_FILE.read_text())
     return {"posted": []}
 
 
-def save_posted_videos(data):
-    with open(DATA_FILE, 'w') as f:
-        json.dump(data, f, indent=2)
+def save_posted(data):
+    DATA_FILE.write_text(json.dumps(data, indent=2))
 
 
-def get_youtube_feed(channel_id):
-    url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
-    feed = feedparser.parse(url)
+def mark_posted(vid):
+    d = load_posted()
+    d["posted"].append(vid)
+    save_posted(d)
+
+
+def commit_posted():
+    try:
+        subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
+        subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
+        subprocess.run(["git", "add", "posted_videos.json"], check=True)
+        r = subprocess.run(["git", "diff", "--cached", "--quiet"], check=False)
+        if r.returncode != 0:
+            subprocess.run(["git", "commit", "-m", "update posted"], check=True)
+            subprocess.run(["git", "push"], check=True)
+            log.info("posted_videos.json pushed")
+    except Exception as e:
+        log.error(f"git push error: {e}")
+
+
+def get_feed(channel_id):
+    feed = feedparser.parse(f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}")
     videos = []
-    for entry in feed.entries:
-        published = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
-        videos.append({
-            "id": entry.yt_videoid,
-            "title": entry.title,
-            "link": entry.link,
-            "published": published,
-            "published_str": entry.published,
-            "description": entry.get("summary", ""),
-            "media_group": entry.get("media_group", {})
-        })
+    for e in feed.entries:
+        pub = datetime(*e.published_parsed[:6], tzinfo=timezone.utc)
+        videos.append({"id": e.yt_videoid, "title": e.title, "link": e.link, "published": pub, "description": e.get("summary", "")})
     return videos
 
 
-def get_new_videos_last_hour(channel_id):
-    posted_data = load_posted_videos()
-    all_videos = get_youtube_feed(channel_id)
+def get_new_videos(channel_id):
+    posted = load_posted()["posted"]
     now = datetime.now(timezone.utc)
-    one_hour_ago = now - timedelta(hours=1)
-
-    new_videos = []
-    for v in all_videos:
-        if v["id"] in posted_data["posted"]:
-            continue
-        if v["published"] >= one_hour_ago:
-            new_videos.append(v)
-
-    return new_videos
+    return [v for v in get_feed(channel_id) if v["id"] not in posted and v["published"] >= now - timedelta(hours=2)]
 
 
-def generate_instagram_caption(video_title, video_link, video_description=""):
-    description_text = video_description[:2000] if video_description else ""
+def download_video(url):
+    tmp = tempfile.mkdtemp()
+    out = os.path.join(tmp, "video.mp4")
+
+    cookies_content = os.getenv("YOUTUBE_COOKIES")
+    if cookies_content:
+        cookie_path = os.path.join(tmp, "cookies.txt")
+        import base64
+        with open(cookie_path, "wb") as f:
+            f.write(base64.b64decode(cookies_content))
+    else:
+        cookie_path = "cookies.txt"
+
+    cmd = [
+        "yt-dlp",
+        "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "--merge-output-format", "mp4",
+        "--cookies", cookie_path,
+        "--js-runtimes", "node",
+        "--no-playlist",
+        "--no-progress",
+        "--socket-timeout", "30",
+        "-o", out,
+        url
+    ]
+
+    log.info(f"Downloading: {url}")
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    log.info(f"yt-dlp exit: {r.returncode}")
+    if r.stderr:
+        log.info(f"stderr: {r.stderr[:500]}")
+
+    if os.path.exists(out) and os.path.getsize(out) > 100000:
+        return out
+
+    for f in os.listdir(tmp):
+        if f.endswith((".mp4", ".webm", ".mkv")):
+            return os.path.join(tmp, f)
+
+    return None
+
+
+def generate_caption(title, description=""):
+    keys = [k.strip() for k in os.getenv("GEMINI_API_KEYS", "").split(",") if k.strip()]
+    if not keys:
+        return f"🎬 {title}\n\n#YouTube #Video"
 
     prompt = f"""Sen profesyonel bir Instagram sosyal medya uzmanisin. Asagidaki YouTube videosu icin tek bir profesyonel Instagram Reels caption yaz.
 
-VIDEO BASLIGI: {video_title}
-
-VIDEO ACIKLAMASI (transcript/konu ozeti):
-{description_text}
+VIDEO BASLIGI: {title}
+VIDEO ACIKLAMASI: {description[:2000]}
 
 KURALLAR:
-- TAM 1 caption yaz, birden fazla secenek DEGIL
-- Video hangi dildeyse caption O DILDE yaz (Turkce ise Turkce, Rusca ise Rusca, Ingilizce ise Ingilizce)
-- Emoji kullan (3-5 tane, abartma)
-- Cekici, merak uyandirici ve profesyonel ol
-- 5-7 tane hashtag ekle (konuyla ilgili, buyuk ve kucuk harf karisik)
-- Hashtag'leri caption'in ALTINA ayri satirda yaz
-- Linki ekleme, sadece caption yaz
-- Max 4-5 cumle olsun
-- Tik gibi kisa ve vurucu olsun
-- Sondaki hashtag'ler # ile baslasin
+- TAM 1 caption yaz
+- Video hangi dildeyse caption O DILDE yaz
+- Emoji kullan (3-5 tane)
+- Cekici ve profesyonel ol
+- 5-7 hashtag ekle
+- Max 4-5 cumle
 
-ORNEK (Turkce video icin):
-Bu gercek sizi sasirtacak! Film dunyasindaki bu kucuk sirri biliyor muydunuz? 👀🔥
+SADECE caption yaz."""
 
-#sinema #film #merak #marvel #superkahraman
+    for key in keys:
+        try:
+            c = genai.Client(api_key=key)
+            resp = c.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+            return resp.text.strip().replace("**", "")
+        except Exception as e:
+            log.warning(f"Gemini key {key[:12]} failed: {e}")
+            continue
 
-SADECE caption yaz, baska bir sey yazma, secenek sunma, baslik ekleme."""
-
-    try:
-        resp, _, _, _ = gemini.generate_content(prompt)
-        caption = resp.text.strip()
-
-        caption = caption.replace("**", "")
-        caption = caption.replace("Seçenek 1:", "")
-        caption = caption.replace("Seçenek 2:", "")
-        caption = caption.replace("Seçenek 3:", "")
-        caption = caption.replace("Seçenek 4:", "")
-        caption = caption.replace("**Seçenek", "")
-
-        lines = caption.split('\n')
-        clean_lines = [l for l in lines if not l.strip().startswith('**Seçenek') and not l.strip().startswith('Seçenek')]
-        caption = '\n'.join(clean_lines).strip()
-
-        return caption
-    except Exception as e:
-        logger.error(f"Gemini caption hatasi: {e}")
-        return f"🎬 {video_title}\n\n#YouTube #Video"
+    return f"🎬 {title}\n\n#YouTube #Video"
 
 
-def download_youtube_video(video_url):
-    ytdlp_api_url = os.getenv('YTDLP_API_URL', '').rstrip('/')
-    if ytdlp_api_url:
-        return download_via_api(video_url, ytdlp_api_url)
+def upload_to_instagram(video_path, caption):
+    from instagrapi import Client
+
+    cl = Client()
+    cl.login(os.getenv("INSTAGRAM_USERNAME"), os.getenv("INSTAGRAM_PASSWORD"))
+
+    media = cl.clip_upload(path=video_path, caption=caption)
+    log.info(f"Instagram upload success! Media ID: {media.pk}")
+    return True
+
+
+def check_and_post():
+    force_id = os.getenv("FORCE_VIDEO_ID")
+
+    if force_id:
+        log.info(f"FORCE MODE: posting {force_id}")
+        videos = get_feed(CHANNEL_ID)
+        new = [v for v in videos if v["id"] == force_id]
     else:
-        return download_via_ytdlp(video_url)
+        new = get_new_videos(CHANNEL_ID)
 
+    if not new:
+        log.info("No new videos.")
+        return
 
-def download_via_api(video_url, api_url):
-    try:
-        tmp_dir = tempfile.mkdtemp()
-        output_path = os.path.join(tmp_dir, "video.mp4")
+    log.info(f"Found {len(new)} new videos")
 
-        logger.info(f"yt-dlp API ile video indiriliyor: {api_url}")
-        resp = requests.post(
-            api_url + '/download',
-            json={"url": video_url, "quality": "1080"},
-            timeout=300,
-            stream=True
-        )
+    for video in new:
+        log.info(f"Processing: {video['title']}")
 
-        logger.info(f"API response: {resp.status_code}")
+        video_path = download_video(video["link"])
+        if not video_path:
+            log.error(f"Download failed: {video['title']}")
+            continue
 
-        if resp.status_code != 200:
-            logger.error(f"API hatasi: {resp.status_code} {resp.text[:200]}")
-            return None
+        caption = generate_caption(video["title"], video.get("description", ""))
+        log.info(f"Caption: {caption[:100]}...")
 
-        with open(output_path, 'wb') as f:
-            for chunk in resp.iter_content(chunk_size=8192):
-                f.write(chunk)
-
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 100000:
-            logger.info(f"Video indirildi: {output_path} ({os.path.getsize(output_path)} bytes)")
-            return output_path
-
-        logger.error("Video dosyasi cok kucuk veya bos")
-        return None
-    except Exception as e:
-        logger.error(f"API video indirme hatasi: {e}")
-        return None
-
-
-def download_and_upload_via_api(video_url, api_url):
-    try:
-        logger.info(f"API ile download+upload: {api_url}")
-        resp = requests.post(
-            api_url + '/download-upload',
-            json={"url": video_url, "quality": "1080"},
-            timeout=360
-        )
-
-        logger.info(f"API response: {resp.status_code} {resp.text[:300]}")
-
-        if resp.status_code == 200:
-            data = resp.json()
-            url = data.get('url')
-            if url:
-                logger.info(f"Catbox URL: {url}")
-                return url
-
-        logger.error(f"API hatasi: {resp.status_code}")
-        return None
-    except Exception as e:
-        logger.error(f"API download+upload hatasi: {e}")
-        return None
-
-
-def download_via_ytdlp(video_url):
-    try:
-        tmp_dir = tempfile.mkdtemp()
-        output_path = os.path.join(tmp_dir, "video.mp4")
-
-        cmd = [
-            "python", "-m", "yt_dlp",
-            "-f", "bestvideo[height<=1080]+bestaudio/best",
-            "--merge-output-format", "mp4",
-            "--cookies", "cookies.txt",
-            "--remote-components", "ejs:github",
-            "--quiet",
-            "--no-playlist",
-            "--no-progress",
-            "-o", output_path,
-            video_url
-        ]
-
-        logger.info(f"yt-dlp ile video indiriliyor...")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        logger.info(f"yt-dlp returncode: {result.returncode}")
-        if result.stderr:
-            logger.info(f"yt-dlp stderr: {result.stderr[:500]}")
-
-        if os.path.exists(output_path):
-            logger.info(f"Video indirildi: {output_path}")
-            return output_path
-
-        for f in os.listdir(tmp_dir):
-            if f.endswith(('.mp4', '.webm', '.mkv')):
-                found = os.path.join(tmp_dir, f)
-                logger.info(f"Bulunan video dosyasi: {found}")
-                return found
-
-        logger.error(f"Tmp dizininde video yok: {os.listdir(tmp_dir)}")
-        return None
-    except Exception as e:
-        logger.error(f"yt-dlp video indirme hatasi: {e}")
-        return None
-
-
-def upload_to_catbox(file_path):
-    try:
-        file_size = os.path.getsize(file_path)
-        logger.info(f"Catbox yukleme: {file_path} ({file_size} bytes)")
-        with open(file_path, 'rb') as f:
-            response = requests.post(
-                'https://catbox.moe/user/api.php',
-                data={'reqtype': 'fileupload', 'userhash': ''},
-                files={'fileToUpload': ('video.mp4', f, 'video/mp4')},
-                timeout=180
-            )
-
-        logger.info(f"Catbox response: {response.status_code} - {response.text[:200]}")
-        if response.status_code == 200 and response.text.startswith('http'):
-            return response.text.strip()
-
-        logger.error(f"Catbox yukleme basarisiz: {response.status_code} {response.text[:200]}")
-        return None
-    except Exception as e:
-        logger.error(f"Catbox yukleme hatasi: {e}")
-        return None
-
-
-def create_instagram_reels(video, access_token, business_account_id):
-    try:
-        caption = generate_instagram_caption(video["title"], video["link"], video.get("description", ""))
-        logger.info(f"Olusturulan caption: {caption}")
-
-        ytdlp_api_url = os.getenv('YTDLP_API_URL', '').rstrip('/')
-
-        video_url = None
-        video_path = None
-
-        if ytdlp_api_url:
-            logger.info("Video indiriliyor + catbox'a yukleniyor (API)...")
-            video_url = download_and_upload_via_api(video["link"], ytdlp_api_url)
-        else:
-            logger.info("Video indiriliyor...")
-            video_path = download_youtube_video(video["link"])
-            if video_path:
-                logger.info("Video catbox'a yukleniyor...")
-                video_url = upload_to_catbox(video_path)
-
-        if video_path:
+        try:
+            upload_to_instagram(video_path, caption)
+        except Exception as e:
+            log.error(f"Instagram upload failed: {e}")
+            continue
+        finally:
             try:
                 os.remove(video_path)
                 os.rmdir(os.path.dirname(video_path))
             except:
                 pass
 
-        if not video_url:
-            logger.error("Video yuklenemedi!")
-            return False
-
-        logger.info(f"Video URL: {video_url}")
-
-        url = f"https://graph.facebook.com/v18.0/{business_account_id}/media"
-        payload = {
-            'media_type': 'REELS',
-            'caption': caption,
-            'share_to_feed': 'true',
-            'access_token': access_token,
-            'video_url': video_url
-        }
-
-        response = requests.post(url, data=payload)
-
-        if response.status_code == 200:
-            container_id = response.json().get('id')
-            logger.info(f"Instagram container olusturuldu: {container_id}")
-
-            for i in range(40):
-                time.sleep(5)
-                check = requests.get(
-                    f"https://graph.facebook.com/v18.0/{container_id}",
-                    params={'fields': 'status_code', 'access_token': access_token}
-                )
-                status = check.json().get('status_code', '')
-                logger.info(f"  Durum: {status} ({(i+1)*5}s)")
-
-                if status == 'FINISHED':
-                    break
-                elif status == 'ERROR':
-                    logger.error(f"Video isleme hatasi: {check.json()}")
-                    return False
-
-            if status != 'FINISHED':
-                logger.error("Video isleme zaman asimi!")
-                return False
-
-            publish_url = f"https://graph.facebook.com/v18.0/{business_account_id}/media_publish"
-            publish_payload = {
-                'creation_id': container_id,
-                'access_token': access_token
-            }
-            publish_response = requests.post(publish_url, data=publish_payload)
-
-            if publish_response.status_code == 200:
-                logger.info("Instagram Reels paylasimi basarili!")
-                return True
-            else:
-                logger.error(f"Instagram publish hatasi: {publish_response.text}")
-                return False
-        else:
-            logger.error(f"Instagram container hatasi: {response.text}")
-            return False
-    except Exception as e:
-        logger.error(f"Instagram hatasi: {e}")
-        return False
-
-
-def check_and_post():
-    channel_id = os.getenv('YOUTUBE_CHANNEL_ID', 'UCDxooL2M22LvKI32dREyjfQ')
-    instagram_token = os.getenv('INSTAGRAM_ACCESS_TOKEN')
-    instagram_business_id = os.getenv('INSTAGRAM_BUSINESS_ACCOUNT_ID')
-    force_video_id = os.getenv('FORCE_VIDEO_ID')
-
-    if force_video_id:
-        logger.info(f"TEST MODU: Video {force_video_id} zorla paylasiliyor...")
-        all_videos = get_youtube_feed(channel_id)
-        new_videos = [v for v in all_videos if v["id"] == force_video_id]
-        if not new_videos:
-            logger.error(f"Video bulunamadi: {force_video_id}")
-            return
-    else:
-        logger.info("Son 1 saatteki videolar kontrol ediliyor...")
-        new_videos = get_new_videos_last_hour(channel_id)
-
-    if not new_videos:
-        logger.info("Son 1 saatte yeni video bulunamadi.")
-        return
-
-    logger.info(f"{len(new_videos)} yeni video bulundu.")
-
-    for video in new_videos:
-        logger.info(f"Paylasiliyor: {video['title']}")
-
-        if instagram_token and instagram_business_id:
-            success = create_instagram_reels(video, instagram_token, instagram_business_id)
-            if not success:
-                logger.error(f"Video paylasilamadi: {video['title']}, tekrar denenecek.")
-                continue
-        else:
-            logger.error("Instagram token veya business ID eksik!")
-            continue
-
-        mark_as_posted(video['id'])
-        time.sleep(5)
-
-
-def mark_as_posted(video_id):
-    posted_data = load_posted_videos()
-    posted_data["posted"].append(video_id)
-    save_posted_videos(posted_data)
-
-
-def commit_posted_videos():
-    try:
-        import subprocess
-        subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
-        subprocess.run(["git", "config", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
-        subprocess.run(["git", "add", "posted_videos.json"], check=True)
-        result = subprocess.run(["git", "diff", "--cached", "--quiet"], check=False)
-        if result.returncode != 0:
-            subprocess.run(["git", "commit", "-m", "Update posted_videos.json"], check=True)
-            subprocess.run(["git", "push"], check=True)
-            logger.info("posted_videos.json guncellendi ve push edildi.")
-        else:
-            logger.info("posted_videos.json degisiklik yok.")
-    except Exception as e:
-        logger.error(f"Git push hatasi: {e}")
+        mark_posted(video["id"])
+        log.info(f"Done: {video['title']}")
 
 
 if __name__ == "__main__":
-    import sys
-
-    if "--run-once" in sys.argv:
-        check_and_post()
-        commit_posted_videos()
-    else:
-        logger.info("Bot baslatildi - her 10 dakikada bir kontrol edilecek")
-        schedule.every(10).minutes.do(check_and_post)
-        schedule.every(10).minutes.do(commit_posted_videos)
-
-        check_and_post()
-
-        while True:
-            schedule.run_pending()
-            time.sleep(60)
+    check_and_post()
+    commit_posted()

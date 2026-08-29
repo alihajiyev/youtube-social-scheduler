@@ -5,5 +5,8 @@ __pycache__/
 .vscode/
 .idea/
 *.log
+cookies.txt
+cookies*.txt
+posted_videos.json
 test_*.png
 test_*.mp4
