@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import tempfile
 import subprocess
@@ -16,6 +17,14 @@ log = logging.getLogger(__name__)
 
 DATA_FILE = Path("posted_videos.json")
 CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID", "UCDxooL2M22LvKI32dREyjfQ")
+
+PIPED_INSTANCES = [
+    "https://pipedapi.kavin.rocks",
+    "https://api.piped.projectsegfau.lt",
+    "https://pipedapi.in.projectsegfau.lt",
+    "https://pipedapi.adminforge.de",
+    "https://pipedapi.moomoo.me",
+]
 
 
 def load_posted():
@@ -63,7 +72,81 @@ def get_new_videos(channel_id):
     return [v for v in get_feed(channel_id) if v["id"] not in posted and v["published"] >= now - timedelta(hours=2)]
 
 
-def download_video(url):
+def extract_video_id(url):
+    patterns = [r'(?:v=|/)([\w-]{11})', r'(?:youtu\.be/)([\w-]{11})']
+    for p in patterns:
+        m = re.search(p, url)
+        if m:
+            return m.group(1)
+    return None
+
+
+def download_via_piped(video_url):
+    video_id = extract_video_id(video_url)
+    if not video_id:
+        log.error(f"Could not extract video ID from: {video_url}")
+        return None
+
+    for instance in PIPED_INSTANCES:
+        try:
+            log.info(f"Piped API: {instance}/streams/{video_id}")
+            r = requests.get(f"{instance}/streams/{video_id}", timeout=30)
+            if r.status_code != 200:
+                log.warning(f"Piped {instance} returned {r.status_code}")
+                continue
+
+            data = r.json()
+            title = data.get("title", "unknown")
+            log.info(f"Piped title: {title}")
+
+            video_streams = data.get("videoStreams", [])
+            audio_streams = data.get("audioStreams", [])
+
+            mp4_videos = [s for s in video_streams if s.get("format") == "MPEG_4" and s.get("videoOnly") is False]
+            if not mp4_videos:
+                mp4_videos = [s for s in video_streams if s.get("format") == "MPEG_4"]
+
+            if not mp4_videos:
+                log.warning(f"No MP4 streams found on {instance}")
+                continue
+
+            best = sorted(mp4_videos, key=lambda x: x.get("height", 0), reverse=True)
+            selected = None
+            for s in best:
+                h = s.get("height", 0)
+                if h <= 1080:
+                    selected = s
+                    break
+            if not selected:
+                selected = best[0]
+
+            stream_url = selected.get("url")
+            if not stream_url:
+                log.warning(f"No URL in stream from {instance}")
+                continue
+
+            log.info(f"Downloading from Piped: {selected.get('quality', '?')} ({selected.get('width', '?')}x{selected.get('height', '?')})")
+
+            tmp = tempfile.mkdtemp()
+            out = os.path.join(tmp, "video.mp4")
+
+            vid_r = requests.get(stream_url, stream=True, timeout=300)
+            with open(out, 'wb') as f:
+                for chunk in vid_r.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            if os.path.exists(out) and os.path.getsize(out) > 100000:
+                log.info(f"Piped download success: {out} ({os.path.getsize(out)} bytes)")
+                return out
+
+        except Exception as e:
+            log.warning(f"Piped {instance} error: {e}")
+            continue
+
+    return None
+
+
+def download_via_ytdlp(video_url):
     tmp = tempfile.mkdtemp()
     out = os.path.join(tmp, "video.mp4")
 
@@ -87,14 +170,18 @@ def download_video(url):
         "--no-progress",
         "--socket-timeout", "60",
         "-o", out,
-        url
+        video_url
     ]
 
-    log.info(f"Downloading: {url}")
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-    log.info(f"yt-dlp exit: {r.returncode}")
-    if r.stderr:
-        log.info(f"stderr: {r.stderr[:500]}")
+    log.info(f"yt-dlp fallback: {video_url}")
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        log.info(f"yt-dlp exit: {r.returncode}")
+        if r.stderr:
+            log.info(f"stderr: {r.stderr[:300]}")
+    except Exception as e:
+        log.error(f"yt-dlp error: {e}")
+        return None
 
     if os.path.exists(out) and os.path.getsize(out) > 100000:
         return out
@@ -104,6 +191,16 @@ def download_video(url):
             return os.path.join(tmp, f)
 
     return None
+
+
+def download_video(video_url):
+    log.info("Trying Piped API first...")
+    result = download_via_piped(video_url)
+    if result:
+        return result
+
+    log.info("Piped failed, trying yt-dlp fallback...")
+    return download_via_ytdlp(video_url)
 
 
 def generate_caption(title, description=""):
