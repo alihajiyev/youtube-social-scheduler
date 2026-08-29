@@ -23,7 +23,6 @@ INVIDIOUS_INSTANCES = [
     "https://invidious.nerdvpn.de",
     "https://invidious.f5.si",
     "https://yt.chocolatemoo53.com",
-    "https://invidious.privacydev.net",
 ]
 
 
@@ -358,5 +357,15 @@ def check_and_post():
 
 
 if __name__ == "__main__":
-    check_and_post()
-    commit_posted()
+    import sys
+    if "--run-once" in sys.argv:
+        check_and_post()
+        commit_posted()
+    else:
+        import schedule
+        log.info("Bot started - checking every 10 minutes")
+        schedule.every(10).minutes.do(check_and_post)
+        check_and_post()
+        while True:
+            schedule.run_pending()
+            time.sleep(60)
