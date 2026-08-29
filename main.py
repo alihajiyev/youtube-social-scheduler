@@ -78,9 +78,10 @@ def download_video(url):
 
     cmd = [
         "yt-dlp",
-        "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "-f", "bestvideo[height<=1080]+bestaudio/best",
         "--merge-output-format", "mp4",
         "--cookies", cookie_path,
+        "--extractor-args", "youtube:player_client=ios,android",
         "--remote-components", "ejs:github",
         "--no-playlist",
         "--no-progress",
