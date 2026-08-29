@@ -174,6 +174,31 @@ def download_via_api(video_url, api_url):
         return None
 
 
+def download_and_upload_via_api(video_url, api_url):
+    try:
+        logger.info(f"API ile download+upload: {api_url}")
+        resp = requests.post(
+            api_url + '/download-upload',
+            json={"url": video_url, "quality": "1080"},
+            timeout=360
+        )
+
+        logger.info(f"API response: {resp.status_code} {resp.text[:300]}")
+
+        if resp.status_code == 200:
+            data = resp.json()
+            url = data.get('url')
+            if url:
+                logger.info(f"Catbox URL: {url}")
+                return url
+
+        logger.error(f"API hatasi: {resp.status_code}")
+        return None
+    except Exception as e:
+        logger.error(f"API download+upload hatasi: {e}")
+        return None
+
+
 def download_via_ytdlp(video_url):
     try:
         tmp_dir = tempfile.mkdtemp()
@@ -243,21 +268,27 @@ def create_instagram_reels(video, access_token, business_account_id):
         caption = generate_instagram_caption(video["title"], video["link"], video.get("description", ""))
         logger.info(f"Olusturulan caption: {caption}")
 
-        logger.info("Video indiriliyor...")
-        video_path = download_youtube_video(video["link"])
+        ytdlp_api_url = os.getenv('YTDLP_API_URL', '').rstrip('/')
 
-        if not video_path:
-            logger.error("Video indirilemedi!")
-            return False
+        video_url = None
+        video_path = None
 
-        logger.info("Video catbox'a yukleniyor...")
-        video_url = upload_to_catbox(video_path)
+        if ytdlp_api_url:
+            logger.info("Video indiriliyor + catbox'a yukleniyor (API)...")
+            video_url = download_and_upload_via_api(video["link"], ytdlp_api_url)
+        else:
+            logger.info("Video indiriliyor...")
+            video_path = download_youtube_video(video["link"])
+            if video_path:
+                logger.info("Video catbox'a yukleniyor...")
+                video_url = upload_to_catbox(video_path)
 
-        try:
-            os.remove(video_path)
-            os.rmdir(os.path.dirname(video_path))
-        except:
-            pass
+        if video_path:
+            try:
+                os.remove(video_path)
+                os.rmdir(os.path.dirname(video_path))
+            except:
+                pass
 
         if not video_url:
             logger.error("Video yuklenemedi!")
