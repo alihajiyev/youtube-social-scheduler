@@ -216,8 +216,7 @@ def check_and_post():
 
     if force_id:
         log.info(f"FORCE MODE: {force_id}")
-        videos = get_feed(CHANNEL_ID)
-        new = [v for v in videos if v["id"] == force_id]
+        new = [{"id": force_id, "title": force_id, "link": f"https://www.youtube.com/watch?v={force_id}", "description": ""}]
     else:
         new = get_new_videos(CHANNEL_ID)
 
