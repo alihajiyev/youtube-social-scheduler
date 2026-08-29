@@ -41,7 +41,6 @@ def download():
         '--merge-output-format', 'mp4',
         '--cookies', COOKIES_PATH,
         '--remote-components', 'ejs:github',
-        '--quiet',
         '--no-playlist',
         '--no-progress',
         '--socket-timeout', '30',
