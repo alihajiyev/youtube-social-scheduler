@@ -18,12 +18,12 @@ log = logging.getLogger(__name__)
 DATA_FILE = Path("posted_videos.json")
 CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID", "UCDxooL2M22LvKI32dREyjfQ")
 
-PIPED_INSTANCES = [
-    "https://pipedapi.kavin.rocks",
-    "https://api.piped.projectsegfau.lt",
-    "https://pipedapi.in.projectsegfau.lt",
-    "https://pipedapi.adminforge.de",
-    "https://pipedapi.moomoo.me",
+INVIDIOUS_INSTANCES = [
+    "https://inv.nadeko.net",
+    "https://invidious.nerdvpn.de",
+    "https://invidious.f5.si",
+    "https://yt.chocolatemoo53.com",
+    "https://invidious.privacydev.net",
 ]
 
 
@@ -81,40 +81,42 @@ def extract_video_id(url):
     return None
 
 
-def download_via_piped(video_url):
+def download_via_invidious(video_url):
     video_id = extract_video_id(video_url)
     if not video_id:
         log.error(f"Could not extract video ID from: {video_url}")
         return None
 
-    for instance in PIPED_INSTANCES:
+    for instance in INVIDIOUS_INSTANCES:
         try:
-            log.info(f"Piped API: {instance}/streams/{video_id}")
-            r = requests.get(f"{instance}/streams/{video_id}", timeout=30)
+            api_url = f"{instance}/api/v1/videos/{video_id}?fields=adaptiveFormats,formatStreams,title"
+            log.info(f"Invidious API: {api_url}")
+            r = requests.get(api_url, timeout=30)
             if r.status_code != 200:
-                log.warning(f"Piped {instance} returned {r.status_code}")
+                log.warning(f"Invidious {instance} returned {r.status_code}")
                 continue
 
             data = r.json()
             title = data.get("title", "unknown")
-            log.info(f"Piped title: {title}")
+            log.info(f"Invidious title: {title}")
 
-            video_streams = data.get("videoStreams", [])
-            audio_streams = data.get("audioStreams", [])
+            format_streams = data.get("formatStreams", [])
+            adaptive = data.get("adaptiveFormats", [])
 
-            mp4_videos = [s for s in video_streams if s.get("format") == "MPEG_4" and s.get("videoOnly") is False]
-            if not mp4_videos:
-                mp4_videos = [s for s in video_streams if s.get("format") == "MPEG_4"]
+            mp4_streams = [s for s in format_streams if "mp4" in s.get("type", "")]
 
-            if not mp4_videos:
+            if not mp4_streams:
+                mp4_streams = [s for s in adaptive if "video/mp4" in s.get("type", "") and "audio" not in s.get("type", "")]
+
+            if not mp4_streams:
                 log.warning(f"No MP4 streams found on {instance}")
                 continue
 
-            best = sorted(mp4_videos, key=lambda x: x.get("height", 0), reverse=True)
+            best = sorted(mp4_streams, key=lambda x: int(x.get("resolution", "0p").replace("p", "") or 0), reverse=True)
             selected = None
             for s in best:
-                h = s.get("height", 0)
-                if h <= 1080:
+                res = int(s.get("resolution", "0p").replace("p", "") or 0)
+                if res <= 1080:
                     selected = s
                     break
             if not selected:
@@ -125,7 +127,7 @@ def download_via_piped(video_url):
                 log.warning(f"No URL in stream from {instance}")
                 continue
 
-            log.info(f"Downloading from Piped: {selected.get('quality', '?')} ({selected.get('width', '?')}x{selected.get('height', '?')})")
+            log.info(f"Downloading from Invidious: {selected.get('resolution', '?')} ({selected.get('type', '?')})")
 
             tmp = tempfile.mkdtemp()
             out = os.path.join(tmp, "video.mp4")
@@ -136,11 +138,11 @@ def download_via_piped(video_url):
                     f.write(chunk)
 
             if os.path.exists(out) and os.path.getsize(out) > 100000:
-                log.info(f"Piped download success: {out} ({os.path.getsize(out)} bytes)")
+                log.info(f"Invidious download success: {out} ({os.path.getsize(out)} bytes)")
                 return out
 
         except Exception as e:
-            log.warning(f"Piped {instance} error: {e}")
+            log.warning(f"Invidious {instance} error: {e}")
             continue
 
     return None
@@ -194,12 +196,12 @@ def download_via_ytdlp(video_url):
 
 
 def download_video(video_url):
-    log.info("Trying Piped API first...")
-    result = download_via_piped(video_url)
+    log.info("Trying Invidious API first...")
+    result = download_via_invidious(video_url)
     if result:
         return result
 
-    log.info("Piped failed, trying yt-dlp fallback...")
+    log.info("Invidious failed, trying yt-dlp fallback...")
     return download_via_ytdlp(video_url)
 
 
