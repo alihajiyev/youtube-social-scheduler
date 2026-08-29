@@ -82,6 +82,8 @@ def download_video(url):
         "--merge-output-format", "mp4",
         "--cookies", cookie_path,
         "--js-runtimes", "node",
+        "--remote-components", "ejs:github",
+        "--extractor-args", "youtube:player_client=mweb",
         "--no-playlist",
         "--no-progress",
         "--socket-timeout", "60",
