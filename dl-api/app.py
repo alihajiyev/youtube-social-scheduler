@@ -33,7 +33,6 @@ def _download_video(video_url, quality):
         '-f', f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best',
         '--merge-output-format', 'mp4',
         '--cookies', COOKIES_PATH,
-        '--remote-components', 'ejs:github',
         '--no-playlist',
         '--no-progress',
         '--socket-timeout', '30',
