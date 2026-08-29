@@ -81,7 +81,7 @@ def download_video(url):
         "-f", "bestvideo[height<=1080]+bestaudio/best",
         "--merge-output-format", "mp4",
         "--cookies", cookie_path,
-        "--extractor-args", "youtube:player_client=ios,android",
+        "--extractor-args", "youtube:player_client=web_creator,web",
         "--remote-components", "ejs:github",
         "--no-playlist",
         "--no-progress",
